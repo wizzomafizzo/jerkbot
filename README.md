@@ -3,7 +3,8 @@ jerkbot
 
 reddit bot for archiving K.dot comments before they're deleted
 
-## actual testimonials
+### actual testimonials
+
 **"i saw the code and i was like... haaaaaannh~!! nice bot ;)"** --Kanye "Weezy" West
 
 ```
@@ -25,7 +26,7 @@ reddit bot for archiving K.dot comments before they're deleted
 ....  .. .....~7DDDD8Z$$$Z8MNMMNNMMMNMMMMMNND8DNNMMMMMMNMN7I?...,... .~.. ....,=
 ..............+?ZDDD8OZ$ZNMMMMMMMMMNMMNMMMMNMMMMMMMMMMMMMNMMM~...... ,........,=
 .. . .........,=ZDD8OZZ$$MNMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMNNMI=..,.    .  .   . .
-. . . .  .....,INNDNMMNMNNMMMMMMMMMMMMMMMMD~MMNMMMMMMMMMMMDMDI.....             
+. . . .  .....,INNDNMMNMNNMMMMMMMMMMMMMMMMD~MMNMMMMMMMMMMMDMDI.....
 ..   .......,=Z77ODDOO$ZZMMMMMMMMMMNMMMMNMM$?$DMMMMMMMMMMNNMN~...,.. ..  ......,
 .    ........:D8$I7OOZZ$$MNMMMMMMMMMMMNMMMZ?+IOMMMMMMMMMMNMM7?.....   .  .......
 ..   ........+$$777ZOZZ$$MNMMMNNNNNNMNMMMN?+?I$NMMMMMMMMMNMZ?~....    ...   ....

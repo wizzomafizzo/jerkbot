@@ -164,7 +164,7 @@ def jerk_run():
         try:
             screenie = take_screenshot(keys["url"], keys["name"])
         except:
-            logging.exception("Error while taking screenshot of %s", (url))
+            logging.exception("Error while taking screenshot of %s", (keys["url"]))
             continue
 
         if os.path.getsize(screenie) > config["imgur_max_size"]:
