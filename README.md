@@ -3,7 +3,27 @@ jerkbot
 
 reddit bot for archiving K.dot comments before they're deleted
 
-### actual testimonials
+#### dependencies
+
+most of these are in pip and you can get static PhantomJS builds on their website
+
+- Python 3
+- PRAW
+- pyimgur
+- Pillow
+- selenium
+- PhantomJS
+
+#### how to install
+you'll need to figure out your own cron job frequency and result limit so you don't go over the api limit for reddit and imgur
+- download a tarball of the latest commit
+- extract it anywhere
+- ```$ cd <jerkbot dir>```
+- ```$ cp config.py.default config.py```
+- edit config.py and fill in all your own settings
+- add a cron job to run jerkbot like ```./jerkbot.py``` (you can also use check.sh)
+
+#### actual testimonials
 
 **"i saw the code and i was like... haaaaaannh~!! nice bot ;)"** --Kanye "Weezy" West
 
