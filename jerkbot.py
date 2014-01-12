@@ -179,7 +179,7 @@ def jerk_run():
         try:
             imgur = upload_screenshot(screenie)
         except:
-            logging.exception("Could upload %s" % (filename))
+            logging.exception("Could not upload %s" % (screenie))
             continue
         db.set_submission_status(keys["name"], "uploaded")
 
@@ -188,8 +188,11 @@ def jerk_run():
             if not config["disable_comment"]:
                 new.add_comment(comment)
             logging.info(comment)
+        except praw.errors.RateLimitExceeded:
+            logging.info("You probably need more link karma on your reddit account")
+            logging.exception("Not allowed to post comment")
         except:
-            logging.exception("Error adding comment to %s" % (key["permalink"]))
+            logging.exception("Error adding comment to %s" % (keys["permalink"]))
             continue
         db.set_submission_status(keys["name"], "complete")
     logging.info("jerkbot run complete")
