@@ -1,0 +1,37 @@
+"""
+Configuration settings for jerkbot
+"""
+
+config = {
+    # User agent that reddit will see in PRAW
+    "user_agent": "jerkbot/0.1 by <YOU, BABE>",
+    # Result count limit for PRAW
+    "result_limit": 10,
+    # Directory for storing screenshots
+    "image_dir": "./images",
+    # imgur API client ID
+    "imgur_api_key": "",
+    # imgur max file size (~1MB)
+    "imgur_max_size": 1000000,
+    # subreddit that we're checking
+    "subreddit": "",
+    # reddit bot username,
+    "reddit_username": "",
+    # reddit bot password
+    "reddit_password": "",
+    # phantomjs executable file
+    "phantomjs_exe": "phantomjs",
+    # screenshot viewport
+    "viewport": (1024, 768),
+    # crop image this high if file size is too big
+    "cropped_height": 8000,
+    # database file location
+    "db_file": "jerk.db",
+    # log file location
+    "log_file": "jerk.log",
+    # what to say in the screenshot comment
+    # %s is replaced by the imgur url
+    "comment_text": "Screenshot: %s",
+    # disable reddit commenting for testing purposes
+    "disable_comment": True
+}
