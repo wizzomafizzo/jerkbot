@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
 """
-Reddit bot for archiving backpacker comments
+Reddit bot for managing hhcj
 
 It will:
-- Get a list of the newest comment/self-post submissions
-- Take a screenshot of the linked page
-- Upload it to imgur
-- Post the screenshot as a comment in the submission
+- Take screenshots of comment submissions and post an imgur link as a comment
+- Remove submissions without np subdomain links, notify user and mod mail
 
 You'll need:
 - Python 3
@@ -45,7 +43,8 @@ if not os.path.isdir(CONFIG["image_dir"]):
     os.mkdir(CONFIG["image_dir"])
     logging.info("Created new image_dir: %s" % (CONFIG["image_dir"]))
 
-# db is just for tracking job progess so we don't double up on work
+# this database keeps track of processed submissions, so work is not doubled up
+# and also maintains a shitlist of users
 class JerkDB():
     def __init__(self):
         self.db_filename = CONFIG["db_file"]
@@ -57,7 +56,7 @@ class JerkDB():
 
     def init_db(self):
         tables = ("create table submissions (name text, url text, status text)",
-                  "create table users (name text, status text)")
+                  "create table users (name text, status text, reason text)")
         db = sqlite3.connect(self.db_filename)
         c = db.cursor()
         for t in tables:
@@ -112,7 +111,18 @@ class JerkDB():
         else:
             return True
 
+    # TODO: methods for maintaining user list
+    def add_user(self, name, status):
+        pass
+
+    def remove_user(self, name):
+        pass
+
+    def update_user(self, name, status):
+        pass
+
 def should_screenshot(url):
+    """Return true if submission is a comment link not in the same sub."""
     comment_pattern = "reddit.com/r/\w+/comments/\w+"
     subreddit_pattern = "/%s/" % (CONFIG["subreddit"])
 
@@ -125,12 +135,18 @@ def should_screenshot(url):
     return False
 
 def is_np(url):
+    """Return true if url is a no participate link."""
     if re.match("https*://np\.", url):
         return True
     else:
         return False
 
+def to_np(url):
+    """Return a comment url converted to the np subdomain."""
+    return re.sub("https*://.*reddit.com", "https://np.reddit.com", url)
+
 def get_new_submissions(db):
+    """Get newest submissions, add them as pending in database and return Submission objects."""
     reddit = praw.Reddit(user_agent=CONFIG["user_agent"])
     reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
     new_submissions = reddit.get_subreddit(CONFIG["subreddit"]).get_new(limit=CONFIG["result_limit"])
@@ -141,6 +157,7 @@ def get_new_submissions(db):
     return submissions
 
 def take_screenshot(url, name):
+    """Take screenshot of url and save to file, return path."""
     driver = webdriver.PhantomJS(executable_path=CONFIG["phantomjs_exe"])
     filename = os.path.join(CONFIG["image_dir"], "%s.png" % (name))
     driver.set_window_size(*CONFIG["viewport"])
@@ -151,11 +168,13 @@ def take_screenshot(url, name):
     return filename
 
 def upload_screenshot(filename):
+    """Upload image file to imgur, return url."""
     imgur = pyimgur.Imgur(client_id=CONFIG["imgur_api_key"])
     uploaded = imgur.upload_image(filename)
     return uploaded.link
 
 def crop_screenshot(filename):
+    """Crop a screenshot to configured height, save to file and return path."""
     screenshot = Image.open(filename)
     cropped = screenshot.crop((0, 0, CONFIG["viewport"][0], CONFIG["cropped_height"]))
     cropped_filename = re.sub("\.png$", "-cropped.png", filename)
@@ -163,13 +182,14 @@ def crop_screenshot(filename):
     return cropped_filename
 
 def mod_submission(db, new):
-    """Make sure a submission follows the rules"""
+    """Make sure a submission follows the rules.
 
+    - Linked comments must use np subdomain, remove and notify bad submissions"""
     keys = vars(new)
 
     # bail out if we already did this one
     if db.already_done(keys["name"]):
-        logging.debug("Skip modded %s" % (keys["name"]))
+        logging.debug("Skip modding %s" % (keys["name"]))
         return
 
     # TODO: remove submission if user is shitlisted
@@ -177,34 +197,39 @@ def mod_submission(db, new):
     # TODO: warn if it's a young account
 
     # check it is an np link for comment subs
-    # if it is, remove it and make a comment
+    # if it is, remove it and notify user, modmail
     if should_screenshot(keys["url"]) and not is_np(keys["url"]):
         logging.info("%s is not an np link" % keys["name"])
 
-        # notify user
-        # TODO: suggest updated link
-        comment = "fam, you need to submit this as an np link. this submission has been removed"
+        # submission comment
+        comment = "fam, you need to submit this as an np link. this submission has been removed\n\n"
+        comment += "you can resubmit with this link:\n\n%s" % (to_np(keys["url"]))
+
         try:
+            # notify user
             if not CONFIG["testing"]:
                 new.add_comment(comment)
-            logging.info(comment)
+            logging.info("COMMENT: " + comment)
+
+            # send mod mail
+            if not CONFIG["testing"]:
+                keys["subreddit"].send_message("removed a non-np submission",
+                                               "this one: %s" % (keys["permalink"]))
+            logging.info("Notified mods")
+
+            # remove the submission
+            if not CONFIG["testing"]:
+                new.remove()
+            logging.info("Removed submission")
         except:
-            logging.exception("Error adding comment to %s" % (keys["permalink"]))
+            logging.exception("Error modding submission: %s" % (keys["permalink"]))
             db.set_submission_status(keys["name"], "failed")
             return
-
-        # remove submission
-        # TODO: will need a catch on this, maybe roll above into this
-        if not CONFIG["testing"]:
-            keys["subreddit"].send_message("removed a non-np submission",
-                                           "this one: %s" % (keys["permalink"]))
-            logging.info("Notified mods")
-            new.remove()
-            logging.info("Removed submission")
 
         db.set_submission_status(keys["name"], "complete")
 
 def try_screenshot(db, new):
+    """If required, take a screenshot of submission link and post comment to uploaded image."""
     keys = vars(new)
 
     # bail out if we already did this one
@@ -259,6 +284,7 @@ def try_screenshot(db, new):
     return True
 
 def jerk_run():
+    """Main function for app, completes one full scan of subreddit."""
     db = JerkDB()
 
     logging.info("jerkbot init")
@@ -270,6 +296,7 @@ def jerk_run():
         logging.exception("Unable to connect to reddit")
         return
 
+    # attempt to mod and snap all new submissions
     for submission in new_submissions:
         mod_submission(db, submission)
         try_screenshot(db, submission)
