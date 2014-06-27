@@ -18,16 +18,29 @@ You'll need:
 - PhantomJS (you can download static builds off their site)
 """
 
-import logging, os, re, sqlite3
+import logging, logging.handlers, os, re, sqlite3, sys
 import praw, pyimgur
 from PIL import Image
 from selenium import webdriver
 
 from config import CONFIG
 
-logging.basicConfig(filename=CONFIG["log_file"], level=logging.INFO,
-                    format="%(asctime)s: %(message)s")
+# fancy logging shit
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
+rotate = logging.handlers.RotatingFileHandler(CONFIG["log_file"],
+                                              maxBytes=1024*1000,
+                                              backupCount=5)
+rotate.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(message)s"))
+logger.addHandler(rotate)
+
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+console.setFormatter(logging.Formatter("%(levelname)-8s %(message)s"))
+logger.addHandler(console)
+
+# make the image dir, parent dir must exist
 if not os.path.isdir(CONFIG["image_dir"]):
     os.mkdir(CONFIG["image_dir"])
     logging.info("Created new image_dir: %s" % (CONFIG["image_dir"]))
@@ -43,7 +56,8 @@ class JerkDB():
         self.db = sqlite3.connect(self.db_filename)
 
     def init_db(self):
-        tables = ("create table submissions (name text, url text, status text)",)
+        tables = ("create table submissions (name text, url text, status text)",
+                  "create table users (name text, status text)")
         db = sqlite3.connect(self.db_filename)
         c = db.cursor()
         for t in tables:
@@ -68,9 +82,9 @@ class JerkDB():
         return c.fetchall()
 
     def already_done(self, name):
-        q = "select name from submissions where name = ? and status = ?"
+        q = "select name from submissions where name = ? and (status = ? or status = ?)"
         c = self.db.cursor()
-        c.execute(q, (name, "complete"))
+        c.execute(q, (name, "complete", "failed"))
         if c.fetchone() == None:
             return False
         else:
@@ -98,34 +112,38 @@ class JerkDB():
         else:
             return True
 
-def get_new_submissions():
+def should_screenshot(url):
+    comment_pattern = "reddit.com/r/\w+/comments/\w+"
+    subreddit_pattern = "/%s/" % (CONFIG["subreddit"])
+
+    # we're only interested in comments and self posts
+    if re.search(comment_pattern, url, re.I) != None:
+        # but not from the subreddit we're submitting to
+        if re.search(subreddit_pattern, url, re.I) == None:
+            return True
+
+    return False
+
+def is_np(url):
+    if re.match("https*://np\.", url):
+        return True
+    else:
+        return False
+
+def get_new_submissions(db):
     reddit = praw.Reddit(user_agent=CONFIG["user_agent"])
     reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
     new_submissions = reddit.get_subreddit(CONFIG["subreddit"]).get_new(limit=CONFIG["result_limit"])
-    valid_submissions = []
-    db = JerkDB()
+    submissions = [x for x in new_submissions]
 
-    for new in new_submissions:
-        comment_pattern = "reddit.com/r/\w+/comments/\w+"
-        subreddit_pattern = "/%s/" % (CONFIG["subreddit"])
-        submission = vars(new)
-        url = submission["url"]
+    [db.add_submission(vars(x)) for x in submissions]
 
-        # we're only interested in comments and self posts
-        if re.search(comment_pattern, url, re.I) != None:
-            # but not from the subreddit we're submitting to
-            if re.search(subreddit_pattern, url, re.I) == None:
-                valid_submissions.append((new, submission))
-
-    for valid in valid_submissions:
-        db.add_submission(valid[1])
-
-    return [x[0] for x in valid_submissions]
+    return submissions
 
 def take_screenshot(url, name):
     driver = webdriver.PhantomJS(executable_path=CONFIG["phantomjs_exe"])
     filename = os.path.join(CONFIG["image_dir"], "%s.png" % (name))
-    driver.set_window_size(CONFIG["viewport"]*)
+    driver.set_window_size(*CONFIG["viewport"])
     logging.info("Taking screenshot of %s (%s)" % (name, url))
     driver.get(url)
     driver.get_screenshot_as_file(filename)
@@ -144,74 +162,120 @@ def crop_screenshot(filename):
     cropped.save(cropped_filename)
     return cropped_filename
 
-def submission_run(db, submissions):
+def mod_submission(db, new):
+    """Make sure a submission follows the rules"""
 
+    keys = vars(new)
 
-    # this is where the magic happens
-    for new in new_submissions:
-        keys = vars(new)
+    # bail out if we already did this one
+    if db.already_done(keys["name"]):
+        logging.debug("Skip modded %s" % (keys["name"]))
+        return
 
-        # bail out if we already did this one
-        if db.already_done(keys["name"]):
-            logging.info("Already done %s" % (keys["name"]))
-            continue
+    # TODO: remove submission if user is shitlisted
 
-        # take and save the screenshot
+    # TODO: warn if it's a young account
+
+    # check it is an np link for comment subs
+    # if it is, remove it and make a comment
+    if should_screenshot(keys["url"]) and not is_np(keys["url"]):
+        logging.info("%s is not an np link" % keys["name"])
+
+        # notify user
+        # TODO: suggest updated link
+        comment = "fam, you need to submit this as an np link. this submission has been removed"
         try:
-            screenie = take_screenshot(keys["url"], keys["name"])
-        except:
-            logging.exception("Error while taking screenshot of %s", (keys["url"]))
-            continue
-
-        # crop it, if required
-        if os.path.getsize(screenie) > CONFIG["imgur_max_size"]:
-            try:
-                cropped = crop_screenshot(screenie)
-                screenie = cropped
-            except:
-                logging.exception("Unable to crop screenshot %s" % (screenie))
-                continue
-            db.set_submission_status(keys["name"], "cropped")
-
-        # upload to imgur
-        try:
-            imgur = upload_screenshot(screenie)
-        except:
-            logging.exception("Could not upload %s" % (screenie))
-            continue
-        db.set_submission_status(keys["name"], "uploaded")
-
-        # post the link in the submission thread
-        comment = CONFIG["comment_text"] % (imgur)
-        try:
-            if not CONFIG["disable_comment"]:
+            if not CONFIG["testing"]:
                 new.add_comment(comment)
             logging.info(comment)
-        except praw.errors.RateLimitExceeded:
-            logging.info("You probably need more link karma on your reddit account")
-            logging.exception("Not allowed to post comment")
         except:
             logging.exception("Error adding comment to %s" % (keys["permalink"]))
-            continue
+            db.set_submission_status(keys["name"], "failed")
+            return
 
-        # aaaand we're done
+        # remove submission
+        # TODO: will need a catch on this, maybe roll above into this
+        if not CONFIG["testing"]:
+            keys["subreddit"].send_message("removed a non-np submission",
+                                           "this one: %s" % (keys["permalink"]))
+            logging.info("Notified mods")
+            new.remove()
+            logging.info("Removed submission")
+
         db.set_submission_status(keys["name"], "complete")
+
+def try_screenshot(db, new):
+    keys = vars(new)
+
+    # bail out if we already did this one
+    if db.already_done(keys["name"]):
+        logging.debug("Skip screenshot %s" % (keys["name"]))
+        return False
+
+    # don't bother if it's not a comment outside the sub
+    if not should_screenshot(keys["url"]):
+        logging.info("Don't need to screenshot %s" % keys["name"])
+        db.set_submission_status(keys["name"], "complete")
+        return False
+
+    # take and save the screenshot
+    try:
+        screenie = take_screenshot(keys["url"], keys["name"])
+    except:
+        logging.exception("Error while taking screenshot of %s", (keys["url"]))
+        return False
+
+    # crop it, if required
+    if os.path.getsize(screenie) > CONFIG["imgur_max_size"]:
+        try:
+            cropped = crop_screenshot(screenie)
+            screenie = cropped
+        except:
+            logging.exception("Unable to crop screenshot %s" % (screenie))
+            return False
+        db.set_submission_status(keys["name"], "cropped")
+
+    # upload to imgur
+    try:
+        imgur = upload_screenshot(screenie)
+    except:
+        logging.exception("Could not upload %s" % (screenie))
+        return False
+    db.set_submission_status(keys["name"], "uploaded")
+
+    # post the link in the submission thread
+    comment = "screenshot: %s" % (imgur)
+    try:
+        if not CONFIG["testing"]:
+            new.add_comment(comment)
+        logging.info(comment)
+    except:
+        logging.exception("Error adding comment to %s" % (keys["permalink"]))
+        db.set_submission_status(keys["name"], "failed")
+        return False
+
+    # aaaand we're done
+    db.set_submission_status(keys["name"], "complete")
+    return True
 
 def jerk_run():
     db = JerkDB()
 
     logging.info("jerkbot init")
 
-    # get list of latest submissions
+    # get list of latest submissions and start tracking
     try:
-        new_submissions = get_new_submissions()
+        new_submissions = get_new_submissions(db)
     except:
         logging.exception("Unable to connect to reddit")
         return
 
-    submission_run(db, new_submissions)
+    for submission in new_submissions:
+        mod_submission(db, submission)
+        try_screenshot(db, submission)
 
     logging.info("jerkbot run complete")
 
 if __name__ == "__main__":
     jerk_run()
+    sys.exit(0)
