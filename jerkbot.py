@@ -23,22 +23,19 @@ import praw, pyimgur
 from PIL import Image
 from selenium import webdriver
 
-from config import config
+from config import CONFIG
 
-logging.basicConfig(filename=config["log_file"], level=logging.INFO,
+logging.basicConfig(filename=CONFIG["log_file"], level=logging.INFO,
                     format="%(asctime)s: %(message)s")
-logging.info("jerkbot init")
 
-if not os.path.isdir(config["image_dir"]):
-    os.mkdir(config["image_dir"])
-    logging.info("Created new image_dir: %s" % (config["image_dir"]))
-
-# TODO: support for resuming unfinished jobs (instead of just restarting them)
+if not os.path.isdir(CONFIG["image_dir"]):
+    os.mkdir(CONFIG["image_dir"])
+    logging.info("Created new image_dir: %s" % (CONFIG["image_dir"]))
 
 # db is just for tracking job progess so we don't double up on work
 class JerkDB():
     def __init__(self):
-        self.db_filename = config["db_file"]
+        self.db_filename = CONFIG["db_file"]
 
         if not os.path.isfile(self.db_filename):
             self.init_db()
@@ -102,15 +99,15 @@ class JerkDB():
             return True
 
 def get_new_submissions():
-    reddit = praw.Reddit(user_agent=config["user_agent"])
-    reddit.login(config["reddit_username"], config["reddit_password"])
-    new_submissions = reddit.get_subreddit(config["subreddit"]).get_new(limit=config["result_limit"])
+    reddit = praw.Reddit(user_agent=CONFIG["user_agent"])
+    reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
+    new_submissions = reddit.get_subreddit(CONFIG["subreddit"]).get_new(limit=CONFIG["result_limit"])
     valid_submissions = []
     db = JerkDB()
 
     for new in new_submissions:
         comment_pattern = "reddit.com/r/\w+/comments/\w+"
-        subreddit_pattern = "/%s/" % (config["subreddit"])
+        subreddit_pattern = "/%s/" % (CONFIG["subreddit"])
         submission = vars(new)
         url = submission["url"]
 
@@ -126,9 +123,9 @@ def get_new_submissions():
     return [x[0] for x in valid_submissions]
 
 def take_screenshot(url, name):
-    driver = webdriver.PhantomJS(executable_path=config["phantomjs_exe"])
-    filename = os.path.join(config["image_dir"], "%s.png" % (name))
-    driver.set_window_size(config["viewport"][0], config["viewport"][1])
+    driver = webdriver.PhantomJS(executable_path=CONFIG["phantomjs_exe"])
+    filename = os.path.join(CONFIG["image_dir"], "%s.png" % (name))
+    driver.set_window_size(CONFIG["viewport"]*)
     logging.info("Taking screenshot of %s (%s)" % (name, url))
     driver.get(url)
     driver.get_screenshot_as_file(filename)
@@ -136,38 +133,38 @@ def take_screenshot(url, name):
     return filename
 
 def upload_screenshot(filename):
-    imgur = pyimgur.Imgur(client_id=config["imgur_api_key"])
+    imgur = pyimgur.Imgur(client_id=CONFIG["imgur_api_key"])
     uploaded = imgur.upload_image(filename)
     return uploaded.link
 
 def crop_screenshot(filename):
     screenshot = Image.open(filename)
-    cropped = screenshot.crop((0, 0, config["viewport"][0], config["cropped_height"]))
+    cropped = screenshot.crop((0, 0, CONFIG["viewport"][0], CONFIG["cropped_height"]))
     cropped_filename = re.sub("\.png$", "-cropped.png", filename)
     cropped.save(cropped_filename)
     return cropped_filename
 
-def jerk_run():
-    db = JerkDB()
-    try:
-        new_submissions = get_new_submissions()
-    except:
-        logging.exception("Unable to connect to reddit")
-        return
+def submission_run(db, submissions):
 
+
+    # this is where the magic happens
     for new in new_submissions:
         keys = vars(new)
+
+        # bail out if we already did this one
         if db.already_done(keys["name"]):
             logging.info("Already done %s" % (keys["name"]))
             continue
 
+        # take and save the screenshot
         try:
             screenie = take_screenshot(keys["url"], keys["name"])
         except:
             logging.exception("Error while taking screenshot of %s", (keys["url"]))
             continue
 
-        if os.path.getsize(screenie) > config["imgur_max_size"]:
+        # crop it, if required
+        if os.path.getsize(screenie) > CONFIG["imgur_max_size"]:
             try:
                 cropped = crop_screenshot(screenie)
                 screenie = cropped
@@ -176,6 +173,7 @@ def jerk_run():
                 continue
             db.set_submission_status(keys["name"], "cropped")
 
+        # upload to imgur
         try:
             imgur = upload_screenshot(screenie)
         except:
@@ -183,9 +181,10 @@ def jerk_run():
             continue
         db.set_submission_status(keys["name"], "uploaded")
 
-        comment = config["comment_text"] % (imgur)
+        # post the link in the submission thread
+        comment = CONFIG["comment_text"] % (imgur)
         try:
-            if not config["disable_comment"]:
+            if not CONFIG["disable_comment"]:
                 new.add_comment(comment)
             logging.info(comment)
         except praw.errors.RateLimitExceeded:
@@ -194,7 +193,24 @@ def jerk_run():
         except:
             logging.exception("Error adding comment to %s" % (keys["permalink"]))
             continue
+
+        # aaaand we're done
         db.set_submission_status(keys["name"], "complete")
+
+def jerk_run():
+    db = JerkDB()
+
+    logging.info("jerkbot init")
+
+    # get list of latest submissions
+    try:
+        new_submissions = get_new_submissions()
+    except:
+        logging.exception("Unable to connect to reddit")
+        return
+
+    submission_run(db, new_submissions)
+
     logging.info("jerkbot run complete")
 
 if __name__ == "__main__":
