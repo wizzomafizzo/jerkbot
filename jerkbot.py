@@ -16,8 +16,10 @@ You'll need:
 - PhantomJS (you can download static builds off their site)
 """
 
-import logging, logging.handlers, os, re, sqlite3, sys
+import logging, logging.handlers, os, sys
+import re, sqlite3, time
 import praw, pyimgur
+
 from PIL import Image
 from selenium import webdriver
 
@@ -64,6 +66,7 @@ class JerkDB():
         db.commit()
         db.close()
 
+    # submission stuff
     def add_submission(self, sub_vars):
         q = "insert into submissions values (?, ?, ?)"
         c = self.db.cursor()
@@ -111,15 +114,41 @@ class JerkDB():
         else:
             return True
 
-    # TODO: methods for maintaining user list
-    def add_user(self, name, status):
-        pass
+    # user stuff
+    def add_user(self, name, status, reason=""):
+        q = "insert into users values (?, ?, ?)"
+        c = self.db.cursor()
+        if not self.user_already_checked(name):
+            logging.info("Adding %s as %s" % (name, status))
+            c.execute(q, (name, status, reason))
+            self.db.commit()
 
-    def remove_user(self, name):
-        pass
+    def set_user_status(self, name, status):
+        q = "update users set status = ? where name = ?"
+        c = self.db.cursor()
+        logging.info("Set user %s status to %s" % (name, status))
+        c.execute(q, (status, name))
+        self.db.commit()
 
-    def update_user(self, name, status):
-        pass
+    def user_is_banned(self, name):
+        q = "select name from users where name = ? and status = ?"
+        c = self.db.cursor()
+        c.execute(q, (name, "banned"))
+        if c.fetchone() == None:
+            return False
+        else:
+            return True
+
+    def user_already_checked(self, name):
+        q = "select name from users where name = ?"
+        c = self.db.cursor()
+
+        c.execute(q, (name,))
+
+        if c.fetchone() == None:
+            return False
+        else:
+            return True
 
 def should_screenshot(url):
     """Return true if submission is a comment link not in the same sub."""
@@ -192,9 +221,30 @@ def mod_submission(db, new):
         logging.debug("Skip modding %s" % (keys["name"]))
         return
 
-    # TODO: remove submission if user is shitlisted
+    # lookup account, warn mods if an author's account is less than N days old
+    if not db.user_already_checked(keys["author"].name):
+        redditor = keys["reddit_session"].get_redditor(keys["author"].name)
+        limit_seconds = CONFIG["sketchy_days"] * 24 * 60 * 60
 
-    # TODO: warn if it's a young account
+        # comment sent to modmail
+        notice = "someone submitted with a recently created account (<%i days)\n\n" % (CONFIG["sketch_days"])
+        notice += "username: %s\n\ninfo: %s\n\nsubmission: %s" % (redditor.name, redditor._url,
+                                                                  keys["url"])
+
+        if (time.time() - redditor.created) < limit_seconds:
+            logging.info("%s is sketchy" % (redditor.name))
+            # add to database sketchy
+            db.add_user(redditor.name, "sketchy")
+            # send mod mail
+            if not CONFIG["testing"]:
+                keys["subreddit"].send_message("fresher detected", notice)
+            logging.info("Notified mods")
+        else:
+            logging.info("%s is cool" % (redditor.name))
+            # add to database pass
+            db.add_user(redditor.name, "pass")
+
+    # TODO: remove submission if user is shadowbanned
 
     # check it is an np link for comment subs
     # if it is, remove it and notify user, modmail
