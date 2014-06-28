@@ -6,6 +6,7 @@ Reddit bot for managing hhcj
 It will:
 - Take screenshots of comment submissions and post an imgur link as a comment
 - Remove submissions without np subdomain links, notify user and mod mail
+- Report users to mods who may be evading bans
 
 You'll need:
 - Python 3
@@ -142,9 +143,7 @@ class JerkDB():
     def user_already_checked(self, name):
         q = "select name from users where name = ?"
         c = self.db.cursor()
-
         c.execute(q, (name,))
-
         if c.fetchone() == None:
             return False
         else:
@@ -185,6 +184,13 @@ def get_new_submissions(db):
 
     return submissions
 
+def get_new_comments():
+    """Get newest comments in subreddit."""
+    reddit = praw.Reddit(user_agent=CONFIG["user_agent"])
+    reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
+    subreddit = reddit.get_subreddit(CONFIG["subreddit"])
+    return subreddit.get_comments(limit=CONFIG["result_limit"])
+
 def take_screenshot(url, name):
     """Take screenshot of url and save to file, return path."""
     driver = webdriver.PhantomJS(executable_path=CONFIG["phantomjs_exe"])
@@ -210,26 +216,15 @@ def crop_screenshot(filename):
     cropped.save(cropped_filename)
     return cropped_filename
 
-def mod_submission(db, new):
-    """Make sure a submission follows the rules.
-
-    - Linked comments must use np subdomain, remove and notify bad submissions"""
-    keys = vars(new)
-
-    # bail out if we already did this one
-    if db.already_done(keys["name"]):
-        logging.debug("Skip modding %s" % (keys["name"]))
-        return
-
+def check_user(db, session, name, subreddit, url=""):
     # lookup account, warn mods if an author's account is less than N days old
-    if not db.user_already_checked(keys["author"].name):
-        redditor = keys["reddit_session"].get_redditor(keys["author"].name)
+    if not db.user_already_checked(name):
+        redditor = session.get_redditor(name)
         limit_seconds = CONFIG["sketchy_days"] * 24 * 60 * 60
 
         # comment sent to modmail
-        notice = "someone submitted with a recently created account (<%i days)\n\n" % (CONFIG["sketch_days"])
-        notice += "username: %s\n\ninfo: %s\n\nsubmission: %s" % (redditor.name, redditor._url,
-                                                                  keys["url"])
+        msg = "someone submitted with a recently created account (<%i days)\n\n" % (CONFIG["sketchy_days"])
+        msg += "username: %s\n\ninfo: %s\n\nsubmission: %s" % (redditor.name, redditor._url, url)
 
         if (time.time() - redditor.created) < limit_seconds:
             logging.info("%s is sketchy" % (redditor.name))
@@ -237,14 +232,33 @@ def mod_submission(db, new):
             db.add_user(redditor.name, "sketchy")
             # send mod mail
             if not CONFIG["testing"]:
-                keys["subreddit"].send_message("fresher detected", notice)
+                subreddit.send_message("fresher detected", msg)
             logging.info("Notified mods")
         else:
             logging.info("%s is cool" % (redditor.name))
             # add to database pass
             db.add_user(redditor.name, "pass")
 
-    # TODO: remove submission if user is shadowbanned
+        return True
+    else:
+        return False
+
+def mod_submission(db, new):
+    """Make sure a submission follows the rules.
+
+    - Linked comments must use np subdomain, remove and notify bad submissions
+    - Lookup and report suspicious users (evading bans)
+    - Remove submissions posted by banned users silently"""
+    keys = vars(new)
+
+    # bail out if we already did this one
+    if db.already_done(keys["name"]):
+        logging.debug("Skip modding %s" % (keys["name"]))
+        return
+
+    # lookup and index account, warn mods if account is suspicious
+    check_user(db, keys["reddit_session"], keys["author"].name,
+               keys["subreddit"], keys["permalink"])
 
     # check it is an np link for comment subs
     # if it is, remove it and notify user, modmail
@@ -271,12 +285,30 @@ def mod_submission(db, new):
             if not CONFIG["testing"]:
                 new.remove()
             logging.info("Removed submission")
+
+            db.set_submission_status(keys["name"], "complete")
         except:
             logging.exception("Error modding submission: %s" % (keys["permalink"]))
             db.set_submission_status(keys["name"], "failed")
             return
 
+    # remove submission silently if user is shadowbanned
+    if db.user_is_banned(keys["author"].name):
+        if not CONFIG["testing"]:
+            new.remove()
+        logging.info("Removed submission, %s is shadowbanned" % new.auther.name)
         db.set_submission_status(keys["name"], "complete")
+
+def mod_comment(db, comment):
+    # check if user is suspicious
+    check_user(db, comment.reddit_session, comment.author.name,
+               comment.subreddit, comment.link_url)
+
+    # shadowban
+    if db.user_is_banned(comment.author.name):
+        if not CONFIG["testing"]:
+            comment.remove()
+        logging.info("Removed comment, %s is shadowbanned" % comment.author.name)
 
 def try_screenshot(db, new):
     """If required, take a screenshot of submission link and post comment to uploaded image."""
@@ -337,21 +369,35 @@ def jerk_run():
     """Main function for app, completes one full scan of subreddit."""
     db = JerkDB()
 
-    logging.info("jerkbot init")
+    logging.info("=== jerkbot init ===")
 
-    # get list of latest submissions and start tracking
+    if CONFIG["testing"]:
+        logging.warning("Testing mode is enabled, nothing much will happen")
+
+    # get list of latest submissions/comments and start tracking
+    logging.info("*** Finding new submissions/comments...")
     try:
         new_submissions = get_new_submissions(db)
+        new_comments = get_new_comments()
     except:
         logging.exception("Unable to connect to reddit")
         return
 
     # attempt to mod and snap all new submissions
+    logging.info("*** Checking submissions...")
     for submission in new_submissions:
-        mod_submission(db, submission)
-        try_screenshot(db, submission)
+        if not db.already_done(submission.name):
+            logging.info(">>> Starting submission %s..." % (submission.name))
+            mod_submission(db, submission)
+            try_screenshot(db, submission)
+            logging.info("<<< Finished submission %s" % (submission.name))
 
-    logging.info("jerkbot run complete")
+    # mod new comments
+    #logging.info("*** Checking comments...")
+    #for comment in new_comments:
+    #    mod_comment(db, comment)
+
+    logging.info("=== jerkbot run complete ===")
 
 if __name__ == "__main__":
     jerk_run()
