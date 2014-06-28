@@ -59,7 +59,8 @@ class JerkDB():
 
     def init_db(self):
         tables = ("create table submissions (name text, url text, status text)",
-                  "create table users (name text, status text, reason text)")
+                  "create table users (name text, status text, reason text)",
+                  "create table comments (name text, status text)")
         db = sqlite3.connect(self.db_filename)
         c = db.cursor()
         for t in tables:
@@ -120,7 +121,7 @@ class JerkDB():
         q = "insert into users values (?, ?, ?)"
         c = self.db.cursor()
         if not self.user_already_checked(name):
-            logging.info("Adding %s as %s" % (name, status))
+            logging.info("Adding user %s as %s" % (name, status))
             c.execute(q, (name, status, reason))
             self.db.commit()
 
@@ -142,6 +143,24 @@ class JerkDB():
 
     def user_already_checked(self, name):
         q = "select name from users where name = ?"
+        c = self.db.cursor()
+        c.execute(q, (name,))
+        if c.fetchone() == None:
+            return False
+        else:
+            return True
+
+    # comment stuff
+    def add_comment(self, name):
+        q = "insert into comments values (?, ?)"
+        c = self.db.cursor()
+        if not self.comment_already_done(name):
+            logging.info("Adding comment %s as complete" % (name))
+            c.execute(q, (name, "complete"))
+            self.db.commit()
+
+    def comment_already_done(self, name):
+        q = "select name from comments where name = ?"
         c = self.db.cursor()
         c.execute(q, (name,))
         if c.fetchone() == None:
@@ -218,6 +237,7 @@ def crop_screenshot(filename):
 
 def check_user(db, session, name, subreddit, url=""):
     # lookup account, warn mods if an author's account is less than N days old
+    # only warns once
     if not db.user_already_checked(name):
         redditor = session.get_redditor(name)
         limit_seconds = CONFIG["sketchy_days"] * 24 * 60 * 60
@@ -266,7 +286,8 @@ def mod_submission(db, new):
         logging.info("%s is not an np link" % keys["name"])
 
         # submission comment
-        comment = "fam, you need to submit this as an np link. this submission has been removed\n\n"
+        comment = "fam, you need to submit this as an np link. this submission has been removed."
+        comment += " you can read why [here](http://www.reddit.com/r/Hiphopcirclejerk/comments/297w9r/actually_serious_new_rule_enforcement_starting_on/).\n\n"
         comment += "you can resubmit with this link:\n\n%s" % (to_np(keys["url"]))
 
         try:
@@ -293,13 +314,18 @@ def mod_submission(db, new):
             return
 
     # remove submission silently if user is shadowbanned
-    if db.user_is_banned(keys["author"].name):
+    if db.user_is_banned(new.author.name):
         if not CONFIG["testing"]:
             new.remove()
-        logging.info("Removed submission, %s is shadowbanned" % new.auther.name)
-        db.set_submission_status(keys["name"], "complete")
+        logging.info("Removed submission, %s is shadowbanned" % new.author.name)
+        db.set_submission_status(new.name, "complete")
 
 def mod_comment(db, comment):
+    # bail out if we already checked
+    if db.comment_already_done(comment.name):
+        logging.debug("Already done %s" % (comment.name))
+        return
+
     # check if user is suspicious
     check_user(db, comment.reddit_session, comment.author.name,
                comment.subreddit, comment.link_url)
@@ -309,6 +335,8 @@ def mod_comment(db, comment):
         if not CONFIG["testing"]:
             comment.remove()
         logging.info("Removed comment, %s is shadowbanned" % comment.author.name)
+
+    db.add_comment(comment.name)
 
 def try_screenshot(db, new):
     """If required, take a screenshot of submission link and post comment to uploaded image."""
@@ -386,6 +414,7 @@ def jerk_run():
     # attempt to mod and snap all new submissions
     logging.info("*** Checking submissions...")
     for submission in new_submissions:
+        # this just hides the logging, functions already check for this
         if not db.already_done(submission.name):
             logging.info(">>> Starting submission %s..." % (submission.name))
             mod_submission(db, submission)
@@ -393,9 +422,9 @@ def jerk_run():
             logging.info("<<< Finished submission %s" % (submission.name))
 
     # mod new comments
-    #logging.info("*** Checking comments...")
-    #for comment in new_comments:
-    #    mod_comment(db, comment)
+    logging.info("*** Checking comments...")
+    for comment in new_comments:
+        mod_comment(db, comment)
 
     logging.info("=== jerkbot run complete ===")
 
