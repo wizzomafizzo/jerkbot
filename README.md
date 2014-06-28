@@ -1,7 +1,7 @@
 jerkbot
 =======
 
-reddit bot for archiving K.dot comments before they're deleted
+reddit bot for archiving K.dot comments before they're deleted, reporting sus users and shadowbanning dicks
 
 #### dependencies
 
@@ -21,7 +21,12 @@ you'll need to figure out your own cron job frequency and result limit so you do
 - ```$ cd <jerkbot dir>```
 - ```$ cp config.py.default config.py```
 - edit config.py and fill in all your own settings
-- add a cron job to run jerkbot like ```./jerkbot.py``` (you can also use check.sh)
+- add a cron job to run jerkbot like ```./jerkbot.py``` (see check.sh too)
+
+extras:
+- make sure to set the comment threshold on the bot's account so comments won't be hidden during screenshot
+- the bot account needs at least post moderator permission on the sub
+- if text is showing up as boxes, there are missing fonts on the host system
 
 #### actual testimonials
 
