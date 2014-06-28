@@ -36,6 +36,9 @@ username: %s
 info: %s
 
 submission: %s
+
+[ban them](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20%s)
+[show ban list](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=showbans)
 """,
     "non-np_subject": "removed a non-np submission",
     "non-np_body": "this one: %s",
@@ -45,7 +48,17 @@ you can resubmit with this link:
 
 %s
 """,
-    "screenshot_comment": "screenshot: %s"
+    "screenshot_comment": "screenshot: %s",
+    "ban_subject": "shadowbans updated",
+    "ban_body": "%s has been shadowbanned by %s",
+    "unban_body": "%s had their shadowban removed by %s",
+    "showbans_body": """shadowban list requested by %s
+
+[ban new user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20username)
+[unban user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=unban%%20username)
+
+%s
+"""
 }
 
 # set up fancy logging shit
@@ -66,7 +79,7 @@ if not os.path.isdir(CONFIG["image_dir"]):
     os.mkdir(CONFIG["image_dir"])
     logging.info("Created new image_dir: %s", CONFIG["image_dir"])
 
-# this database keeps track of processed submissions, so work is not doubled up
+# this database keeps track of processed submissions/comments, so work is not doubled up
 # and also maintains a shitlist of users
 class JerkDB():
     def __init__(self):
@@ -145,6 +158,7 @@ class JerkDB():
             self.db.commit()
 
     def set_user_status(self, name, status):
+        self.add_user(name, status)
         q = "update users set status = ? where name = ?"
         c = self.db.cursor()
         logging.info("Set user %s status to %s", name, status)
@@ -168,6 +182,12 @@ class JerkDB():
             return False
         else:
             return True
+
+    def get_banned_users(self):
+        q = "select name from users where status = ?"
+        c = self.db.cursor()
+        c.execute(q, ("banned",))
+        return [x[0] for x in c.fetchall()]
 
     # comment stuff
     def add_comment(self, name):
@@ -211,19 +231,15 @@ def to_np(url):
     """Return a comment url converted to the np subdomain."""
     return re.sub("https*://.*reddit.com", "https://np.reddit.com", url)
 
-def get_new_submissions(db):
+def get_new_submissions(reddit, db):
     """Get newest submissions, add them as pending in database and return Submission objects."""
-    reddit = praw.Reddit(user_agent=CONFIG["user_agent"])
-    reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
     new_submissions = reddit.get_subreddit(CONFIG["subreddit"]).get_new(limit=CONFIG["result_limit"])
     submissions = [x for x in new_submissions]
     [db.add_submission(x) for x in submissions]
     return submissions
 
-def get_new_comments():
+def get_new_comments(reddit):
     """Get newest comments in subreddit."""
-    reddit = praw.Reddit(user_agent=CONFIG["user_agent"])
-    reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
     subreddit = reddit.get_subreddit(CONFIG["subreddit"])
     return subreddit.get_comments(limit=CONFIG["result_limit"])
 
@@ -252,7 +268,57 @@ def crop_screenshot(filename):
     cropped.save(cropped_filename)
     return cropped_filename
 
+def check_messages(reddit, db):
+    """Get unread bot messages/commands and process."""
+    # get unread messages and mark read/clear notice
+    messages = reddit.get_unread(True, True)
+    subreddit = reddit.get_subreddit(CONFIG["subreddit"])
+    mod_list = [x.name for x in subreddit.get_moderators()]
+
+    for message in messages:
+        # don't process non-direct pm or already processed ones
+        if not db.comment_already_done("pm_" + message.name) and message.context == "":
+            # check user is privileged, ignore if not
+            if not message.author.name in mod_list:
+                logging.warning("Unauthorised user %s tried to run command", message.author.name)
+                db.add_comment("pm_" + message.name)
+                continue
+
+            # process command
+            # NOTE: if this needs to expand it must be split up
+            try:
+                msg = message.body.split()
+                if msg[0] == "ban":
+                    # ban specified user
+                    db.set_user_status(msg[1], "banned")
+                    logging.info("%s has been shadowbanned", msg[1])
+                    subreddit.send_message(TEMPLATES["ban_subject"],
+                                           TEMPLATES["ban_body"] % (msg[1], message.author.name))
+                elif msg[0] == "unban":
+                    # unban specified user
+                    db.set_user_status(msg[1], "pass")
+                    logging.info("%s has been unshadowbanned", msg[1])
+                    subreddit.send_message(TEMPLATES["ban_subject"],
+                                           TEMPLATES["ban_body"] % (msg[1], message.author.name))
+                elif msg[0] == "showbans":
+                    # send list of all bans to modmail
+                    user_list = ""
+                    for user in db.get_banned_users():
+                        user_list += "- %s\n" % user
+                    if user_list == "":
+                        user_list = "no bans"
+
+                    logging.info("Posting ban list")
+                    subreddit.send_message(TEMPLATES["ban_subject"],
+                                           TEMPLATES["showbans_body"] % (message.author.name, user_list))
+            except:
+                # not really fatal if this happens, can simply be logged and skipped
+                logging.exception("Error occurred when process command list")
+            finally:
+                db.add_comment("pm_" + message.name)
+
 def check_user(db, session, name, subreddit, url=""):
+    """Index a new user and report to mods if suspicious."""
     # lookup account, warn mods if an author's account is sketchy lookin
     # only warns once
     if not db.user_already_checked(name):
@@ -269,7 +335,8 @@ def check_user(db, session, name, subreddit, url=""):
                 db.add_user(redditor.name, "sketchy")
                 # send mod mail
                 subreddit.send_message(TEMPLATES["sketchy_subject"],
-                                       TEMPLATES["sketchy_body"] % (redditor.name, redditor._url, url))
+                                       TEMPLATES["sketchy_body"] % (redditor.name, redditor._url,
+                                                                    url, redditor.name))
                 logging.info("Notified mods")
         else:
             logging.info("%s is cool", redditor.name)
@@ -334,6 +401,7 @@ def mod_submission(db, new):
     db.set_submission_status(new.name, "complete")
 
 def mod_comment(db, comment):
+    """Report suspicious users and remove shadowbanned comments."""
     # bail out if we already checked
     if db.comment_already_done(comment.name):
         logging.debug("Already done %s", comment.name)
@@ -410,19 +478,28 @@ def jerk_run():
     db = JerkDB()
 
     logging.info("=== jerkbot init ===")
-    # TODO: log date here
 
     if CONFIG["testing"]:
         logging.warning("!!! Testing mode is enabled, nothing much will happen !!!")
 
-    # get list of latest submissions/comments and start tracking
-    logging.info("*** Finding new submissions/comments...")
+    # start new reddit session
+    logging.info("*** Init reddit session")
     try:
-        new_submissions = get_new_submissions(db)
-        new_comments = get_new_comments()
+        reddit = praw.Reddit(user_agent=CONFIG["user_agent"])
+        reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
     except:
         logging.exception("Unable to connect to reddit")
         return
+
+    # NOTE: these are sorted newest first
+    # check PMs and process any commands as needed
+    logging.info("*** Checking messages...")
+    check_messages(reddit, db)
+
+    # get list of latest submissions/comments and start tracking
+    logging.info("*** Finding new submissions/comments...")
+    new_submissions = get_new_submissions(reddit, db)
+    new_comments = get_new_comments(reddit)
 
     # attempt to mod and snap all new submissions
     logging.info("*** Checking submissions...")
