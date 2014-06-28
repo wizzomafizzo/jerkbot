@@ -26,16 +26,36 @@ from selenium import webdriver
 
 from config import CONFIG
 
-# fancy logging shit
+# notification templates
+TEMPLATES = {
+    "sketchy_subject": "sketchy user detected",
+    "sketchy_body": """someone submitted with a sketchy account (low karma, newly created)
+
+username: %s
+
+info: %s
+
+submission: %s
+""",
+    "non-np_subject": "removed a non-np submission",
+    "non-np_body": "this one: %s",
+    "non-np_comment": """fam, you need to submit this as an np link. this submission has been removed. you can read why [here](http://www.reddit.com/r/Hiphopcirclejerk/comments/297w9r/actually_serious_new_rule_enforcement_starting_on/).
+
+you can resubmit with this link:
+
+%s
+""",
+    "screenshot_comment": "screenshot: %s"
+}
+
+# set up fancy logging shit
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
-
 rotate = logging.handlers.RotatingFileHandler(CONFIG["log_file"],
                                               maxBytes=1024*1000,
                                               backupCount=5)
 rotate.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(message)s"))
 logger.addHandler(rotate)
-
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter("%(levelname)-8s %(message)s"))
@@ -44,7 +64,7 @@ logger.addHandler(console)
 # make the image dir, parent dir must exist
 if not os.path.isdir(CONFIG["image_dir"]):
     os.mkdir(CONFIG["image_dir"])
-    logging.info("Created new image_dir: %s" % (CONFIG["image_dir"]))
+    logging.info("Created new image_dir: %s", CONFIG["image_dir"])
 
 # this database keeps track of processed submissions, so work is not doubled up
 # and also maintains a shitlist of users
@@ -69,13 +89,12 @@ class JerkDB():
         db.close()
 
     # submission stuff
-    def add_submission(self, sub_vars):
+    def add_submission(self, submission):
         q = "insert into submissions values (?, ?, ?)"
         c = self.db.cursor()
-        logging.debug(sub_vars)
-        if not self.already_added(sub_vars["name"]):
-            c.execute(q, (sub_vars["name"], sub_vars["url"], "pending"))
-            logging.info("Added new submission %s as pending" % (sub_vars["name"]))
+        if not self.already_added(submission.name):
+            c.execute(q, (submission.name, submission.url, "pending"))
+            logging.info("Added new submission %s as pending", submission.name)
         self.db.commit()
 
     def get_pending_submissions(self):
@@ -97,7 +116,7 @@ class JerkDB():
     def set_submission_status(self, name, status):
         q = "update submissions set status = ? where name = ?"
         c = self.db.cursor()
-        logging.info("Update %s status to %s" % (name, status))
+        logging.info("Update %s status to %s", name, status)
         c.execute(q, (status, name))
         self.db.commit()
 
@@ -121,14 +140,14 @@ class JerkDB():
         q = "insert into users values (?, ?, ?)"
         c = self.db.cursor()
         if not self.user_already_checked(name):
-            logging.info("Adding user %s as %s" % (name, status))
+            logging.info("Adding user %s as %s", name, status)
             c.execute(q, (name, status, reason))
             self.db.commit()
 
     def set_user_status(self, name, status):
         q = "update users set status = ? where name = ?"
         c = self.db.cursor()
-        logging.info("Set user %s status to %s" % (name, status))
+        logging.info("Set user %s status to %s", name, status)
         c.execute(q, (status, name))
         self.db.commit()
 
@@ -155,7 +174,7 @@ class JerkDB():
         q = "insert into comments values (?, ?)"
         c = self.db.cursor()
         if not self.comment_already_done(name):
-            logging.info("Adding comment %s as complete" % (name))
+            logging.info("Adding comment %s as complete", name)
             c.execute(q, (name, "complete"))
             self.db.commit()
 
@@ -198,9 +217,7 @@ def get_new_submissions(db):
     reddit.login(CONFIG["reddit_username"], CONFIG["reddit_password"])
     new_submissions = reddit.get_subreddit(CONFIG["subreddit"]).get_new(limit=CONFIG["result_limit"])
     submissions = [x for x in new_submissions]
-
-    [db.add_submission(vars(x)) for x in submissions]
-
+    [db.add_submission(x) for x in submissions]
     return submissions
 
 def get_new_comments():
@@ -215,7 +232,7 @@ def take_screenshot(url, name):
     driver = webdriver.PhantomJS(executable_path=CONFIG["phantomjs_exe"])
     filename = os.path.join(CONFIG["image_dir"], "%s.png" % (name))
     driver.set_window_size(*CONFIG["viewport"])
-    logging.info("Taking screenshot of %s (%s)" % (name, url))
+    logging.info("Taking screenshot of %s (%s)", name, url)
     driver.get(url)
     driver.get_screenshot_as_file(filename)
     driver.quit()
@@ -236,29 +253,26 @@ def crop_screenshot(filename):
     return cropped_filename
 
 def check_user(db, session, name, subreddit, url=""):
-    # lookup account, warn mods if an author's account is less than N days old
+    # lookup account, warn mods if an author's account is sketchy lookin
     # only warns once
     if not db.user_already_checked(name):
         redditor = session.get_redditor(name)
         limit_seconds = CONFIG["sketchy_days"] * 24 * 60 * 60
 
-        # comment sent to modmail
-        msg = "someone submitted with a recently created account (<%i days)\n\n" % (CONFIG["sketchy_days"])
-        msg += "username: %s\n\ninfo: %s\n\nsubmission: %s" % (redditor.name, redditor._url, url)
-
-        # check if created recently
+        # check if sketchy
         if (time.time() - redditor.created) < limit_seconds:
             karma = CONFIG["sketchy_karma"]
             # check for low karma
             if redditor.link_karma < karma and redditor.comment_karma < karma:
-                logging.info("%s is sketchy" % (redditor.name))
+                logging.info("%s is sketchy", redditor.name)
                 # add to database sketchy
                 db.add_user(redditor.name, "sketchy")
                 # send mod mail
-                subreddit.send_message("fresher detected", msg)
+                subreddit.send_message(TEMPLATES["sketchy_subject"],
+                                       TEMPLATES["sketchy_body"] % (redditor.name, redditor._url, url))
                 logging.info("Notified mods")
         else:
-            logging.info("%s is cool" % (redditor.name))
+            logging.info("%s is cool", redditor.name)
             # add to database pass
             db.add_user(redditor.name, "pass")
 
@@ -272,37 +286,37 @@ def mod_submission(db, new):
     - Linked comments must use np subdomain, remove and notify bad submissions
     - Lookup and report suspicious users (evading bans)
     - Remove submissions posted by banned users silently"""
-    keys = vars(new)
 
     # bail out if we already did this one
-    if db.already_done(keys["name"]):
-        logging.debug("Skip modding %s" % (keys["name"]))
+    if db.already_done(new.name):
+        logging.debug("Skip modding %s", new.name)
         return
 
     # lookup and index account, warn mods if account is suspicious
-    check_user(db, keys["reddit_session"], keys["author"].name,
-               keys["subreddit"], keys["permalink"])
+    check_user(db, new.reddit_session, new.author.name, new.subreddit, new.permalink)
+
+    # remove submission silently if user is shadowbanned
+    if db.user_is_banned(new.author.name):
+        if not CONFIG["testing"]:
+            new.remove()
+        logging.info("Removed submission, %s is shadowbanned", new.author.name)
+        db.set_submission_status(new.name, "complete")
+        return
 
     # check it is an np link for comment subs
     # if it is, remove it and notify user, modmail
-    if should_screenshot(keys["url"]) and not is_np(keys["url"]):
-        logging.info("%s is not an np link" % keys["name"])
-
-        # submission comment
-        comment = "fam, you need to submit this as an np link. this submission has been removed."
-        comment += " you can read why [here](http://www.reddit.com/r/Hiphopcirclejerk/comments/297w9r/actually_serious_new_rule_enforcement_starting_on/).\n\n"
-        comment += "you can resubmit with this link:\n\n%s" % (to_np(keys["url"]))
+    if should_screenshot(new.url) and not is_np(new.url):
+        logging.info("%s is not an np link", new.name)
 
         try:
             # notify user
             if not CONFIG["testing"]:
-                new.add_comment(comment)
-            logging.info("COMMENT: " + comment)
+                new.add_comment(TEMPLATES["non-np_comment"] % to_np(new.url))
+            logging.info("Notified user of non-np link")
 
             # send mod mail
-            if not CONFIG["testing"]:
-                keys["subreddit"].send_message("removed a non-np submission",
-                                               "this one: %s" % (keys["permalink"]))
+            new.subreddit.send_message(TEMPLATES["non-np_subject"],
+                                       TEMPLATES["non-np_body"] % (new.permalink))
             logging.info("Notified mods")
 
             # remove the submission
@@ -310,23 +324,19 @@ def mod_submission(db, new):
                 new.remove()
             logging.info("Removed submission")
 
-            db.set_submission_status(keys["name"], "complete")
+            db.set_submission_status(new.name, "complete")
+            return
         except:
-            logging.exception("Error modding submission: %s" % (keys["permalink"]))
-            db.set_submission_status(keys["name"], "failed")
+            logging.exception("Error modding submission: %s", new.permalink)
+            db.set_submission_status(new.name, "failed")
             return
 
-    # remove submission silently if user is shadowbanned
-    if db.user_is_banned(new.author.name):
-        if not CONFIG["testing"]:
-            new.remove()
-        logging.info("Removed submission, %s is shadowbanned" % new.author.name)
-        db.set_submission_status(new.name, "complete")
+    db.set_submission_status(new.name, "complete")
 
 def mod_comment(db, comment):
     # bail out if we already checked
     if db.comment_already_done(comment.name):
-        logging.debug("Already done %s" % (comment.name))
+        logging.debug("Already done %s", comment.name)
         return
 
     # check if user is suspicious
@@ -337,73 +347,73 @@ def mod_comment(db, comment):
     if db.user_is_banned(comment.author.name):
         if not CONFIG["testing"]:
             comment.remove()
-        logging.info("Removed comment, %s is shadowbanned" % comment.author.name)
+        logging.info("Removed comment, %s is shadowbanned", comment.author.name)
 
     db.add_comment(comment.name)
 
 def try_screenshot(db, new):
     """If required, take a screenshot of submission link and post comment to uploaded image."""
-    keys = vars(new)
-
     # bail out if we already did this one
-    if db.already_done(keys["name"]):
-        logging.debug("Skip screenshot %s" % (keys["name"]))
-        return False
+    if db.already_done(new.name):
+        logging.debug("Skip screenshot %s", new.name)
+        return
 
     # don't bother if it's not a comment outside the sub
-    if not should_screenshot(keys["url"]):
-        logging.info("Don't need to screenshot %s" % keys["name"])
-        db.set_submission_status(keys["name"], "complete")
-        return False
+    if not should_screenshot(new.url):
+        logging.info("Don't need to screenshot %s", new.name)
+        db.set_submission_status(new.name, "complete")
+        return
 
     # take and save the screenshot
     try:
-        screenie = take_screenshot(keys["url"], keys["name"])
+        screenie = take_screenshot(new.url, new.name)
     except:
-        logging.exception("Error while taking screenshot of %s", (keys["url"]))
-        return False
+        logging.exception("Error while taking screenshot of %s", new.url)
+        return
 
     # crop it, if required
     if os.path.getsize(screenie) > CONFIG["imgur_max_size"]:
+        # TODO: this method of cropping is not totally reliable and can result
+        # in a screenshot being cropped larger than it was, filled with white
+        # space. this happens on subs that have complex themes
         try:
             cropped = crop_screenshot(screenie)
             screenie = cropped
         except:
-            logging.exception("Unable to crop screenshot %s" % (screenie))
-            return False
-        db.set_submission_status(keys["name"], "cropped")
+            logging.exception("Unable to crop screenshot %s", screenie)
+            return
+        db.set_submission_status(new.name, "cropped")
 
     # upload to imgur
     try:
         imgur = upload_screenshot(screenie)
     except:
-        logging.exception("Could not upload %s" % (screenie))
-        return False
-    db.set_submission_status(keys["name"], "uploaded")
+        logging.exception("Could not upload %s", screenie)
+        return
+    db.set_submission_status(new.name, "uploaded")
 
     # post the link in the submission thread
-    comment = "screenshot: %s" % (imgur)
     try:
         if not CONFIG["testing"]:
-            new.add_comment(comment)
-        logging.info(comment)
+            new.add_comment(TEMPLATES["screenshot_comment"] % imgur)
+        logging.info("Linked screenshot in submission")
     except:
-        logging.exception("Error adding comment to %s" % (keys["permalink"]))
-        db.set_submission_status(keys["name"], "failed")
-        return False
+        logging.exception("Error adding comment to %s", new.permalink)
+        db.set_submission_status(new.name, "failed")
+        return
 
     # aaaand we're done
-    db.set_submission_status(keys["name"], "complete")
-    return True
+    db.set_submission_status(new.name, "complete")
 
 def jerk_run():
     """Main function for app, completes one full scan of subreddit."""
     db = JerkDB()
 
     logging.info("=== jerkbot init ===")
+    # TODO: log date here
 
     if CONFIG["testing"]:
-        logging.warning("Testing mode is enabled, nothing much will happen")
+        logging.warning("!!! Testing mode is enabled, nothing much will happen !!!")
 
     # get list of latest submissions/comments and start tracking
     logging.info("*** Finding new submissions/comments...")
@@ -419,10 +429,10 @@ def jerk_run():
     for submission in new_submissions:
         # this just hides the logging, functions already check for this
         if not db.already_done(submission.name):
-            logging.info(">>> Starting submission %s..." % (submission.name))
+            logging.info(">>> Starting submission %s...", submission.name)
             mod_submission(db, submission)
             try_screenshot(db, submission)
-            logging.info("<<< Finished submission %s" % (submission.name))
+            logging.info("<<< Finished submission %s", submission.name)
 
     # mod new comments
     logging.info("*** Checking comments...")
