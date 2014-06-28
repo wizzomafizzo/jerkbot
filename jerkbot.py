@@ -31,14 +31,12 @@ TEMPLATES = {
     "sketchy_subject": "sketchy user detected",
     "sketchy_body": """someone submitted with a sketchy account (low karma, newly created)
 
-username: %s
+- username: %s
+- info: %s
+- submission: %s
 
-info: %s
-
-submission: %s
-
-[ban them](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20%s)
-[show ban list](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=showbans)
+[ban them](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20%s) | [show ban list](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=showbans)
+---|---
 """,
     "non-np_subject": "removed a non-np submission",
     "non-np_body": "this one: %s",
@@ -54,8 +52,10 @@ you can resubmit with this link:
     "unban_body": "%s had their shadowban removed by %s",
     "showbans_body": """shadowban list requested by %s
 
-[ban new user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20username)
-[unban user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=unban%%20username)
+[ban new user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20username) | [unban user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=unban%%20username)
+---|---
+
+---
 
 %s
 """
