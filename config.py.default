@@ -30,6 +30,8 @@ CONFIG = {
     "user_agent": "jerkbot/0.2 by wizzo",
     # how many days until a user isn't sketchy
     "sketchy_days": 7,
+    # how much link or comment karma before user isn't sketchy
+    "sketchy_karma": 5,
     # result count limit for PRAW
     "result_limit": 10,
     # screenshot viewport

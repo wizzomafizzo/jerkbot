@@ -246,14 +246,17 @@ def check_user(db, session, name, subreddit, url=""):
         msg = "someone submitted with a recently created account (<%i days)\n\n" % (CONFIG["sketchy_days"])
         msg += "username: %s\n\ninfo: %s\n\nsubmission: %s" % (redditor.name, redditor._url, url)
 
+        # check if created recently
         if (time.time() - redditor.created) < limit_seconds:
-            logging.info("%s is sketchy" % (redditor.name))
-            # add to database sketchy
-            db.add_user(redditor.name, "sketchy")
-            # send mod mail
-            if not CONFIG["testing"]:
+            karma = CONFIG["sketchy_karma"]
+            # check for low karma
+            if redditor.link_karma < karma and redditor.comment_karma < karma:
+                logging.info("%s is sketchy" % (redditor.name))
+                # add to database sketchy
+                db.add_user(redditor.name, "sketchy")
+                # send mod mail
                 subreddit.send_message("fresher detected", msg)
-            logging.info("Notified mods")
+                logging.info("Notified mods")
         else:
             logging.info("%s is cool" % (redditor.name))
             # add to database pass
