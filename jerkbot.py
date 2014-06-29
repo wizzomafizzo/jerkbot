@@ -384,9 +384,10 @@ def mod_submission(db, new):
             logging.info("Notified user of non-np link")
 
             # send mod mail
-            new.subreddit.send_message(TEMPLATES["non-np_subject"],
-                                       TEMPLATES["non-np_body"] % (new.permalink))
-            logging.info("Notified mods")
+            # NOTE: disabled for now, don't really care
+            #new.subreddit.send_message(TEMPLATES["non-np_subject"],
+            #                           TEMPLATES["non-np_body"] % (new.permalink))
+            #logging.info("Notified mods")
 
             # remove the submission
             if not CONFIG["testing"]:
