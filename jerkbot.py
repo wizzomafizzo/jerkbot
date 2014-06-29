@@ -398,7 +398,9 @@ def mod_submission(db, new):
             db.set_submission_status(new.name, "failed")
             return
 
-    db.set_submission_status(new.name, "complete")
+    # don't bother with anything else if no screenie required
+    if not should_screenshot(new.url):
+        db.set_submission_status(new.name, "complete")
 
 def mod_comment(db, comment):
     """Report suspicious users and remove shadowbanned comments."""
@@ -514,7 +516,9 @@ def jerk_run():
     # mod new comments
     logging.info("*** Checking comments...")
     for comment in new_comments:
-        mod_comment(db, comment)
+        # same here
+        if not db.comment_already_done(comment.name):
+            mod_comment(db, comment)
 
     logging.info("=== jerkbot run complete ===")
 

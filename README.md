@@ -24,7 +24,6 @@ you'll need to figure out your own cron job frequency and result limit so you do
 - add a cron job to run jerkbot like ```./jerkbot.py``` (see check.sh too)
 
 extras:
-- make sure to set the comment threshold on the bot's account so comments won't be hidden during screenshot
 - the bot account needs at least post moderator permission on the sub
 - if text is showing up as boxes, there are missing fonts on the host system
 
