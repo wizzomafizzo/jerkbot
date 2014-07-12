@@ -222,14 +222,14 @@ def should_screenshot(url):
 
 def is_np(url):
     """Return true if url is a no participate link."""
-    if re.match("https*://np\.", url):
+    if re.match("https?://.*\.?np\.", url):
         return True
     else:
         return False
 
 def to_np(url):
     """Return a comment url converted to the np subdomain."""
-    return re.sub("https*://.*reddit.com", "https://np.reddit.com", url)
+    return re.sub("https?://.*reddit\.com", "https://np.reddit.com", url)
 
 def get_new_submissions(reddit, db):
     """Get newest submissions, add them as pending in database and return Submission objects."""
