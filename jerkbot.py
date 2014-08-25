@@ -245,13 +245,13 @@ def get_new_comments(reddit):
 
 def take_screenshot(url, name):
     """Take screenshot of url and save to file, return path."""
-    expand_comments = 'var el=$(".bylink");var ei=0;(function fe(){while(ei<el.length){var s=el[ei].innerHTML;var parent=s.indexOf("parent");if(parent==0){showcomment(el[ei]);}ei++;}})()'
+    #expand_comments = 'var el=$(".bylink");var ei=0;(function fe(){while(ei<el.length){var s=el[ei].innerHTML;var parent=s.indexOf("parent");if(parent==0){showcomment(el[ei]);}ei++;}})()'
     driver = webdriver.PhantomJS(executable_path=CONFIG["phantomjs_exe"])
     filename = os.path.join(CONFIG["image_dir"], "%s.png" % (name))
     driver.set_window_size(*CONFIG["viewport"])
     logging.info("Taking screenshot of %s (%s)", name, url)
     driver.get(url)
-    driver.execute_script(expand_comments)
+    #driver.execute_script(expand_comments)
     driver.get_screenshot_as_file(filename)
     driver.quit()
     return filename
