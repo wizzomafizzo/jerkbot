@@ -301,7 +301,7 @@ def check_messages(reddit, db):
                     db.set_user_status(msg[1], "pass")
                     logging.info("%s has been unshadowbanned", msg[1])
                     subreddit.send_message(TEMPLATES["ban_subject"],
-                                           TEMPLATES["ban_body"] % (msg[1], message.author.name))
+                                           TEMPLATES["unban_body"] % (msg[1], message.author.name))
                 elif msg[0] == "showbans":
                     # send list of all bans to modmail
                     user_list = ""
