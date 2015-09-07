@@ -421,8 +421,10 @@ def do_html_dump(url, name):
     html = urllib.request.urlopen(req).read()
 
     filename = name + "-" + str(int(time.time())) + ".html"
-    dump = open(os.path.join(C["html_dump_dir"], filename), "w")
-    dump.write(str(html))
+    dump = open(os.path.join(C["html_dump_dir"], filename),
+                mode="w",
+                encoding="utf-8")
+    dump.write(html.decode(encoding="utf-8"))
     dump.close()
 
     return filename
