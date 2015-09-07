@@ -3,31 +3,43 @@ Configuration settings for jerkbot
 """
 
 CONFIG = {
-    # database file location
-    "db_file": "/home/jerkbot/run/jerk.db",
-    # log file location
-    "log_file": "/home/jerkbot/run/jerk.log",
-
-    # phantomjs executable file
-    "phantomjs_exe": "/home/jerkbot/phantomjs-1.9.7-linux-x86_64/bin/phantomjs",
-
-    # directory for storing screenshots
-    "image_dir": "/home/jerkbot/run/images",
-    # imgur API client ID
-    "imgur_api_key": "",
-
-    # subreddit that we're checking
-    "subreddit": "",
-    # reddit bot username,
-    "reddit_username": "",
-    # reddit bot password
-    "reddit_password": "",
-
     # disable reddit writing for testing
     "testing": False,
 
+    # database file location
+    "db_file": "./jerk.db",
+    # log file location
+    "log_file": "./jerk.log",
+
+    # phantomjs executable file
+    "phantomjs_exe": "/usr/local/bin/phantomjs",
+
+    # directory for storing screenshots
+    "image_dir": "./images",
+    # public url to image dir
+    "image_dir_url": "http://example.com/reddit_images",
+    # imgur API client ID
+    "imgur_api_key": "REPLACE_ME",
+
+    # location for html dumps
+    "html_dump_dir": "./dumps",
+    # public url to dump dir
+    "dump_dir_url": "http://example.com/reddit_dumps",
+
+    # add a random quote to replies
+    "use_random_quote": True,
+    # possible replies separated by newline
+    "random_comment_file": "./comments.txt",
+
+    # subreddit that we're checking
+    "subreddit": "REPLACE_ME",
+    # reddit bot username,
+    "reddit_username": "REPLACE_ME",
+    # reddit bot password
+    "reddit_password": "REPLACE_ME",
+
     # user agent that reddit will see
-    "user_agent": "jerkbot/0.2 by wizzo",
+    "user_agent": "jerkbot/1.0 by wizzo",
     # how many days until a user isn't sketchy
     "sketchy_days": 7,
     # how much link or comment karma before user isn't sketchy
@@ -40,4 +52,40 @@ CONFIG = {
     "cropped_height": 8000,
     # imgur max file size (~1MB)
     "imgur_max_size": 1000000
+}
+
+# notification templates
+TEMPLATES = {
+    "sketchy_subject": "sketchy user detected",
+    "sketchy_body": """someone submitted with a sketchy account (low karma, newly created)
+
+- username: %s
+- info: %s
+- submission: %s
+
+[ban them](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20%s) | [show ban list](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=showbans)
+---|---
+""",
+    "non-np_comment": """fam, you need to submit this as an np link. this submission has been removed. you can read why [here](https://www.reddit.com/r/NoParticipation/wiki/intro).
+
+you can resubmit with this link:
+
+%s
+""",
+    "screenshot_comment": """%s
+
+### [screenshot](%s) 🔥 [mirror](%s) 🔥 [archive](%s)
+""",
+    "ban_subject": "shadowbans updated",
+    "ban_body": "%s has been shadowbanned by %s",
+    "unban_body": "%s had their shadowban removed by %s",
+    "showbans_body": """shadowban list requested by %s
+
+[ban new user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=ban%%20username) | [unban user](http://www.reddit.com/message/compose/?to=jerkbot-3hunna&subject=shadowban&message=unban%%20username)
+---|---
+
+---
+
+%s
+"""
 }
