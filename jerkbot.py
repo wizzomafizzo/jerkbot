@@ -319,8 +319,15 @@ def check_user(db, session, name, subreddit, url=""):
         redditor = session.get_redditor(name)
         limit_seconds = C["sketchy_days"] * 24 * 60 * 60
 
+        try:
+            created = redditor.created
+        except (praw.errors.NotFound):
+            logging.warning("%s is shadowbanned", name)
+            db.add_user(redditor.name, "pass")
+            return False
+
         # check if sketchy
-        if (time.time() - redditor.created) < limit_seconds:
+        if (time.time() - created) < limit_seconds:
             karma = C["sketchy_karma"]
             # check for low karma
             if (redditor.link_karma < karma
