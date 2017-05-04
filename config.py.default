@@ -37,6 +37,10 @@ CONFIG = {
     "reddit_username": "REPLACE_ME",
     # reddit bot password
     "reddit_password": "REPLACE_ME",
+    # reddit app client id
+    "reddit_client_id": "REPLACE_ME",
+    # reddit app client secret
+    "reddit_client_secret": "REPLACE_ME",
 
     # user agent that reddit will see
     "user_agent": "jerkbot/1.0 by wizzo",

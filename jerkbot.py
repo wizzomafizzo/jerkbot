@@ -217,15 +217,15 @@ def get_new_submissions(reddit, db):
     Submission objects."""
     limit = C["result_limit"]
     subreddit = C["subreddit"]
-    new_submissions = reddit.get_subreddit(subreddit).get_new(limit=limit)
+    new_submissions = reddit.subreddit(subreddit).new(limit=limit)
     submissions = [x for x in new_submissions]
     [db.add_submission(x) for x in submissions]
     return submissions
 
 def get_new_comments(reddit):
     """Get newest comments in subreddit."""
-    subreddit = reddit.get_subreddit(C["subreddit"])
-    return subreddit.get_comments(limit=C["result_limit"])
+    subreddit = reddit.subreddit(C["subreddit"])
+    return subreddit.comments(limit=C["result_limit"])
 
 def take_screenshot(url, name):
     """Take screenshot of url and save to file, return path."""
@@ -234,7 +234,8 @@ def take_screenshot(url, name):
     driver.set_window_size(*C["viewport"])
     logging.info("Taking screenshot of %s (%s)", name, url)
     driver.get(url)
-    #driver.execute_script(expand_comments)
+    # FIXME
+    # driver.execute_script(expand_comments)
     driver.get_screenshot_as_file(filename)
     driver.quit()
     return filename
@@ -259,9 +260,9 @@ def crop_screenshot(filename):
 def check_messages(reddit, db):
     """Get unread bot messages/commands and process."""
     # get unread messages and mark read/clear notice
-    messages = reddit.get_unread(True, True)
-    subreddit = reddit.get_subreddit(C["subreddit"])
-    mod_list = [x.name for x in subreddit.get_moderators()]
+    messages = reddit.inbox.unread(True)
+    subreddit = reddit.subreddit(C["subreddit"])
+    mod_list = [x.name for x in subreddit.moderator()]
 
     for message in messages:
         # don't process non-direct pm or already processed ones
@@ -284,14 +285,14 @@ def check_messages(reddit, db):
                     logging.info("%s has been shadowbanned", msg[1])
                     body = T["ban_body"] % (msg[1],
                                             message.author.name)
-                    subreddit.send_message(subject, body)
+                    subreddit.message(subject, body)
                 elif msg[0] == "unban":
                     # unban specified user
                     db.set_user_status(msg[1], "pass")
                     logging.info("%s has been unshadowbanned", msg[1])
                     body = T["unban_body"] % (msg[1],
                                               message.author.name)
-                    subreddit.send_message(subject, body)
+                    subreddit.message(subject, body)
                 elif msg[0] == "showbans":
                     # send list of all bans to modmail
                     user_list = ""
@@ -303,7 +304,7 @@ def check_messages(reddit, db):
                     logging.info("Posting ban list")
                     body = T["showbans_body"] % (message.author.name,
                                                  user_list)
-                    subreddit.send_message(subject, body)
+                    subreddit.message(subject, body)
             except:
                 # not really fatal if this happens,
                 # can simply be logged and skipped
@@ -316,7 +317,7 @@ def check_user(db, session, name, subreddit, url=""):
     # lookup account, warn mods if an author's account is sketchy lookin
     # only warns once
     if not db.user_already_checked(name):
-        redditor = session.get_redditor(name)
+        redditor = session.redditor(name)
         limit_seconds = C["sketchy_days"] * 24 * 60 * 60
 
         try:
@@ -337,9 +338,9 @@ def check_user(db, session, name, subreddit, url=""):
                 db.add_user(redditor.name, "sketchy")
                 # send mod mail
                 body = T["sketchy_body"] % (redditor.name,
-                                            redditor._url,
+                                            redditor._path,
                                             url, redditor.name)
-                subreddit.send_message(T["sketchy_subject"], body)
+                subreddit.message(T["sketchy_subject"], body)
                 logging.info("Notified mods")
         else:
             logging.info("%s is cool", redditor.name)
@@ -350,7 +351,7 @@ def check_user(db, session, name, subreddit, url=""):
     else:
         return False
 
-def mod_submission(db, new):
+def mod_submission(db, session, new):
     """Make sure a submission follows the rules.
 
     - Linked comments must use np subdomain, remove and notify bad submissions
@@ -363,13 +364,13 @@ def mod_submission(db, new):
         return
 
     # lookup and index account, warn mods if account is suspicious
-    check_user(db, new.reddit_session, new.author.name,
+    check_user(db, session, new.author.name,
                new.subreddit, new.permalink)
 
     # remove submission silently if user is shadowbanned
     if db.user_is_banned(new.author.name):
         if not C["testing"]:
-            new.remove()
+            new.mod.remove()
         logging.info("Removed submission, %s is shadowbanned",
                      new.author.name)
         db.set_submission_status(new.name, "complete")
@@ -383,12 +384,12 @@ def mod_submission(db, new):
         try:
             # notify user
             if not C["testing"]:
-                new.add_comment(T["non-np_comment"] % to_np(new.url))
+                new.reply(T["non-np_comment"] % to_np(new.url))
             logging.info("Notified user of non-np link")
 
             # remove the submission
             if not C["testing"]:
-                new.remove()
+                new.mod.remove()
             logging.info("Removed submission")
 
             db.set_submission_status(new.name, "complete")
@@ -402,7 +403,7 @@ def mod_submission(db, new):
     if not should_screenshot(new.url):
         db.set_submission_status(new.name, "complete")
 
-def mod_comment(db, comment):
+def mod_comment(db, session, comment):
     """Report suspicious users and remove shadowbanned comments."""
     # bail out if we already checked
     if db.comment_already_done(comment.name):
@@ -410,13 +411,13 @@ def mod_comment(db, comment):
         return
 
     # check if user is suspicious
-    check_user(db, comment.reddit_session, comment.author.name,
+    check_user(db, session, comment.author.name,
                comment.subreddit, comment.link_url)
 
     # shadowban
     if db.user_is_banned(comment.author.name):
         if not C["testing"]:
-            comment.remove()
+            comment.mod.remove()
         logging.info("Removed comment, %s is shadowbanned", comment.author.name)
 
     db.add_comment(comment.name)
@@ -505,7 +506,7 @@ def try_screenshot(db, new):
         comment = T["screenshot_comment"] % (quote, imgur,
                                              local_addr,
                                              html_dump_addr)
-        new.add_comment(comment)
+        new.reply(comment)
         logging.info("Added comment")
     except:
         logging.exception("Error adding comment to %s", new.permalink)
@@ -527,8 +528,13 @@ def jerk_run():
     # start new reddit session
     logging.info("*** Init reddit session")
     try:
-        reddit = praw.Reddit(user_agent=C["user_agent"])
-        reddit.login(C["reddit_username"], C["reddit_password"])
+        reddit = praw.Reddit(
+            client_id=C["reddit_client_id"],
+            client_secret=C["reddit_client_secret"],
+            username=C["reddit_username"],
+            password=C["reddit_password"],
+            user_agent=C["user_agent"]
+        )
     except:
         logging.exception("Unable to connect to reddit")
         return
@@ -549,7 +555,7 @@ def jerk_run():
         # this just hides the logging, functions already check for this
         if not db.already_done(submission.name):
             logging.info(">>> Starting submission %s...", submission.name)
-            mod_submission(db, submission)
+            mod_submission(db, reddit, submission)
             try_screenshot(db, submission)
             logging.info("<<< Finished submission %s", submission.name)
 
@@ -558,7 +564,7 @@ def jerk_run():
     for comment in new_comments:
         # same here
         if not db.comment_already_done(comment.name):
-            mod_comment(db, comment)
+            mod_comment(db, reddit, comment)
 
     logging.info("=== jerkbot run complete ===")
 
