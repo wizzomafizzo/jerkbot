@@ -378,7 +378,7 @@ def mod_submission(db, session, new):
 
     # check it is an np link for comment subs
     # if it is, remove it and notify user, modmail
-    if should_screenshot(new.url) and not is_np(new.url):
+    if should_screenshot(new.url) and C["remove_np"] and not is_np(new.url):
         logging.info("%s is not an np link", new.name)
 
         try:

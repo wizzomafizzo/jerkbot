@@ -5,6 +5,8 @@ Configuration settings for jerkbot
 CONFIG = {
     # disable reddit writing for testing
     "testing": False,
+    # remove non-np links
+    "remove_np": True,
 
     # database file location
     "db_file": "./jerk.db",
