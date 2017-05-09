@@ -80,7 +80,7 @@ you can resubmit with this link:
 """,
     "screenshot_comment": """%s
 
-### [screenshot](%s) 🔥 [mirror](%s) 🔥 [archive](%s)
+[screenshot](%s) 🔥 [mirror](%s) 🔥 [archive](%s)
 """,
     "ban_subject": "shadowbans updated",
     "ban_body": "%s has been shadowbanned by %s",
