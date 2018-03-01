@@ -234,8 +234,6 @@ def take_screenshot(url, name):
     driver.set_window_size(*C["viewport"])
     logging.info("Taking screenshot of %s (%s)", name, url)
     driver.get(url)
-    # FIXME
-    # driver.execute_script(expand_comments)
     driver.get_screenshot_as_file(filename)
     driver.quit()
     return filename
@@ -364,11 +362,12 @@ def mod_submission(db, session, new):
         return
 
     # lookup and index account, warn mods if account is suspicious
-    check_user(db, session, new.author.name,
-               new.subreddit, new.permalink)
+    if C["report_suspicious"]:
+        check_user(db, session, new.author.name,
+                   new.subreddit, new.permalink)
 
     # remove submission silently if user is shadowbanned
-    if db.user_is_banned(new.author.name):
+    if C["remove_banned"] and db.user_is_banned(new.author.name):
         if not C["testing"]:
             new.mod.remove()
         logging.info("Removed submission, %s is shadowbanned",
@@ -411,11 +410,12 @@ def mod_comment(db, session, comment):
         return
 
     # check if user is suspicious
-    check_user(db, session, comment.author.name,
-               comment.subreddit, comment.link_url)
+    if C["report_suspicious"]:
+        check_user(db, session, comment.author.name,
+                   comment.subreddit, comment.link_url)
 
     # shadowban
-    if db.user_is_banned(comment.author.name):
+    if C["remove_banned"] and db.user_is_banned(comment.author.name):
         if not C["testing"]:
             comment.mod.remove()
         logging.info("Removed comment, %s is shadowbanned", comment.author.name)
@@ -481,6 +481,14 @@ def try_screenshot(db, new):
         db.set_submission_status(new.name, "fail-upload")
         imgur = False
 
+    try:
+        html_dump = do_html_dump(new.url, new.name)
+        html_dump_addr = "%s/%s" % (C["dump_dir_url"],
+                                    html_dump)
+    except:
+        logging.exception("Could not dump %s", new.name)
+        html_dump_addr = "https://reddit.com/r/" + C["subreddit"]
+        
     if C["testing"]:
         db.set_submission_status(new.name, "complete-test")
         return
@@ -490,7 +498,7 @@ def try_screenshot(db, new):
         if C["use_random_quote"]:
             quote = grab_quote()
         else:
-            quote = "post was archived!"
+            quote = C["default_quote"]
 
         local_addr = "%s/%s" % (C["image_dir_url"],
                                 os.path.basename(original))
@@ -498,10 +506,6 @@ def try_screenshot(db, new):
         # workaround for if imgur upload fails
         if not imgur:
             imgur = local_addr
-
-        html_dump = do_html_dump(new.url, new.name)
-        html_dump_addr = "%s/%s" % (C["dump_dir_url"],
-                                    html_dump)
 
         comment = T["screenshot_comment"] % (quote, imgur,
                                              local_addr,
