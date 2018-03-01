@@ -267,9 +267,14 @@ def check_messages(reddit, db):
         if (not db.comment_already_done("pm_" + message.name)
             and message.context == ""):
             # check user is privileged, ignore if not
-            if not message.author.name in mod_list:
+            if not message.author or not message.author.name in mod_list:
+                # FIXME: I have no idea why this happens
+                if not message.author:
+                    user = "UNKNOWN"
+                else:
+                    user = message.author.name
                 logging.warning("Unauthorised user %s tried to run command",
-                                message.author.name)
+                                user)
                 db.add_comment("pm_" + message.name)
                 continue
 
@@ -338,8 +343,9 @@ def check_user(db, session, name, subreddit, url=""):
                 body = T["sketchy_body"] % (redditor.name,
                                             redditor._path,
                                             url, redditor.name)
-                subreddit.message(T["sketchy_subject"], body)
-                logging.info("Notified mods")
+                if C["report_suspicious"]:
+                    subreddit.message(T["sketchy_subject"], body)
+                    logging.info("Notified mods")
         else:
             logging.info("%s is cool", redditor.name)
             # add to database pass
@@ -362,9 +368,8 @@ def mod_submission(db, session, new):
         return
 
     # lookup and index account, warn mods if account is suspicious
-    if C["report_suspicious"]:
-        check_user(db, session, new.author.name,
-                   new.subreddit, new.permalink)
+    check_user(db, session, new.author.name,
+               new.subreddit, new.permalink)
 
     # remove submission silently if user is shadowbanned
     if C["remove_banned"] and db.user_is_banned(new.author.name):
@@ -410,9 +415,8 @@ def mod_comment(db, session, comment):
         return
 
     # check if user is suspicious
-    if C["report_suspicious"]:
-        check_user(db, session, comment.author.name,
-                   comment.subreddit, comment.link_url)
+    check_user(db, session, comment.author.name,
+               comment.subreddit, comment.link_url)
 
     # shadowban
     if C["remove_banned"] and db.user_is_banned(comment.author.name):
