@@ -7,6 +7,10 @@ CONFIG = {
     "testing": False,
     # remove non-np links
     "remove_np": True,
+    # report suspicious users
+    "report_suspicious": False,
+    # remove banned user posts
+    "remove_banned": False,
 
     # database file location
     "db_file": "./jerk.db",
@@ -30,6 +34,8 @@ CONFIG = {
 
     # add a random quote to replies
     "use_random_quote": True,
+    # placeholder if not quoting
+    "default_quote": "REPLACE_ME",
     # possible replies separated by newline
     "random_comment_file": "./comments.txt",
 
